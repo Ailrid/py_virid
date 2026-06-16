@@ -3,13 +3,20 @@ name = "virid"
 version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
-    "core",
-    "std",
+    "virid-core",
+    "virid-std",
 ]
 
 [tool.uv.workspace]
 members = ["packages/*"]
 
 [tool.uv.sources]
-core = { workspace = true }
-std = { workspace = true }
+virid-core = { workspace = true }
+virid-std = { workspace = true }
+
+[tool.hatch.build.targets.wheel]
+bypass-selection = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
