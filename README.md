@@ -8,10 +8,10 @@ This repository is the `Python` port of `virid` (**Work in Progress**), aimed at
 
 ## Modules
 
-| **Module**     | **Position**     | **Key Features**                                             |
-| -------------- | ---------------- | ------------------------------------------------------------ |
-| **virid.core** | Core             | Deterministic Tick mechanism, dual-buffered message pool, Dependency Injection (DI). |
-| **virid.std**  | Core Enhancement | Provides message transactions, timing/sequence control, etc. |
+| **Module**     | **Position**     | **Key Features**                                             | Install                |
+| -------------- | ---------------- | ------------------------------------------------------------ | ---------------------- |
+| **virid.core** | Core             | Deterministic Tick mechanism, dual-buffered message pool, Dependency Injection (DI). | pip install virid-core |
+| **virid.std**  | Core Enhancement | Provides message transactions, timing/sequence control, etc. | pip install virid-std  |
 
 ## 其他
 
