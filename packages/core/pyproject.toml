@@ -1,0 +1,13 @@
+[project]
+name = "core"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/virid"] # 告诉 Hatch 顶层是个命名空间
+layout = "src"           # 核心：使用标准的 src 布局逻辑
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
