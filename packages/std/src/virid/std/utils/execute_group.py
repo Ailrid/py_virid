@@ -8,6 +8,8 @@ from typing import Any, Callable
 from virid.core import EventMessage, ViridApp, MessageWriter, ExecuteHookContext
 from contextlib import contextmanager
 
+from virid.core.core.message import BaseMessage
+
 # 每个 key 中缓存的执行组队列及状态映射
 execute_group_map: dict[str, list[dict[str, Any]]] = {}
 message_key_map: dict[int, str] = {}  # 键类型改为 int，用于存放 id(message)
@@ -110,16 +112,26 @@ def execute_block(
     original_write = MessageWriter.write
 
     # 定义一个拦截函数
-    def mock_write(message: Any) -> None:
-        if isinstance(message, EventMessage):
+    def mock_write(target: Any, *args, **kwargs) -> None:
+        if isinstance(target, type) and issubclass(target, BaseMessage):
+            # 动态实例化，完美透传所有位置参数与关键字参数
+            instance = target(*args, **kwargs)
+        elif isinstance(target, BaseMessage):
+            instance = target
+        else:
+            raise TypeError(
+                f"[Virid MessageWriter] TypeError: Only BaseMessage subclasses or instances are allowed to be written, got: {type(target).__name__}"
+            )
+
+        if isinstance(instance, EventMessage):
             # 如果是事件消息，拦截下来，存进篮子，先不发送
-            captured_messages.append(message)
+            captured_messages.append(instance)
         else:
             # 如果是其他不归群组管的消息（比如 InfoMessage 等），让它走原渠道正常发
-            original_write(message)
+            original_write(instance)
 
     # 把原本的 write 换成拦截器
-    MessageWriter.write = mock_write # type: ignore
+    MessageWriter.write = mock_write  # type: ignore
 
     try:
         yield  # 此时执行 with 块内部的代码
