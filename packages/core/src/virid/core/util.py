@@ -6,7 +6,7 @@ Project: Virid
 
 from virid.core.app import ViridApp
 from .core.message import ErrorMessage, InfoMessage, WarnMessage
-from logging import getLogger
+from logging import getLogger, StreamHandler
 import logging
 from .decorators import system, component
 
@@ -51,18 +51,28 @@ class ViridFormatter(logging.Formatter):
 
 
 @component()
-class Logger:
+class ViridLogger:
     def __init__(self):
-        logging.basicConfig(level=logging.INFO)
-        handler = logging.root.handlers[0]
-        handler.setFormatter(ViridFormatter("%(message)s"))
-        logger = getLogger(__name__)
         self.enable_logging = True
-        self.writer = logger
+
+        # 显式使用 "virid" 作为命名空间，防止跟用户自己的 root 冲突
+        self.writer = getLogger("virid")
+        self.writer.setLevel(logging.INFO)
+
+        # 切断冒泡传播
+        self.writer.propagate = False
+
+        # 专属的专用 Handler
+        handler = StreamHandler()
+        handler.setFormatter(ViridFormatter("%(message)s"))
+
+        # 避免重复添加 handler（防止多次实例化 Logger 类时堆叠 handler）
+        if not self.writer.handlers:
+            self.writer.addHandler(handler)
 
 
 @system(priority=-9999)
-def error(message: ErrorMessage, logger: Logger) -> None:
+def error(message: ErrorMessage, logger: ViridLogger) -> None:
     if not logger.enable_logging:
         return
     logger.writer.error(message.error, extra={"msg_type": "error"})
@@ -70,21 +80,21 @@ def error(message: ErrorMessage, logger: Logger) -> None:
 
 
 @system(priority=-9999)
-def info(message: InfoMessage, logger: Logger) -> None:
+def info(message: InfoMessage, logger: ViridLogger) -> None:
     if not logger.enable_logging:
         return
     logger.writer.info(message.context)
 
 
 @system(priority=-9999)
-def warn(message: WarnMessage, logger: Logger) -> None:
+def warn(message: WarnMessage, logger: ViridLogger) -> None:
     if not logger.enable_logging:
         return
     logger.writer.warning(message.context)
 
 
 def register_base_handlers(virid: ViridApp) -> None:
-    virid.bind(Logger)
+    virid.bind(ViridLogger)
     virid.register(error)
     virid.register(info)
     virid.register(warn)
