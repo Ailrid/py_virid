@@ -73,12 +73,14 @@ TestMessage.send()
 app.tick()
 
 # The final output is:
+#  ✔ [Virid Info] Global Info Caught:
+#   Details: This is a info message
 # Info: This is a info message
 # Warn: This is a warn message
 # Error: Error Text
 # Error: This is a error message
 # Error: Test
-# Error: [virid Dispatcher]: System Error.
-# SystemLocation: test
-# MessageName: list
+# Error: [virid Dispatcher]: System Error. 
+# SystemName: test 
+# MessageName: list 
 # MessageData: [TestMessage()]

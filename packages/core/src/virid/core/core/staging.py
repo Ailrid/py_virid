@@ -3,32 +3,32 @@ Copyright (c) 2026-present Ailrid.
 Licensed under the Apache License, Version 2.0.
 Project: Virid
 """
+
 from typing import Type
 from .message import BaseMessage, SingleMessage, EventMessage
 from .io import MessageWriter
 
 
-class Stage:
+class Staging:
     def __init__(self):
         # SingleMessage缓冲池
-        self._signal_active: dict[Type[SingleMessage], list[SingleMessage]] = {}
-        self._signal_staging: dict[Type[SingleMessage], list[SingleMessage]] = {}
+        self.signal_active: dict[Type[SingleMessage], list[SingleMessage]] = {}
+        self.signal_staging: dict[Type[SingleMessage], list[SingleMessage]] = {}
 
         # EventMessage缓冲池
-        self._event_active: list[EventMessage] = []
-        self._event_staging: list[EventMessage] = []
+        self.event_active: list[EventMessage] = []
+        self.event_staging: list[EventMessage] = []
 
-    def push(self, event: BaseMessage):
+    def stage(self, event: BaseMessage):
         """根据消息继承范式，物理隔离分流"""
         if isinstance(event, SingleMessage):
             msg_cls = type(event)
-            if msg_cls not in self._signal_staging:
-                self._signal_staging[msg_cls] = []
-            self._signal_staging[msg_cls].append(event)
+            if msg_cls not in self.signal_staging:
+                self.signal_staging[msg_cls] = []
+            self.signal_staging[msg_cls].append(event)
 
         elif isinstance(event, EventMessage):
-            self._event_staging.append(event)
-
+            self.event_staging.append(event)
         else:
             MessageWriter.error(
                 TypeError(
@@ -41,35 +41,35 @@ class Stage:
         翻转双缓冲区：
         """
         # 物理隔离：Active 指向当前轮的快照，Staging 重置为全新容器
-        self._signal_active = self._signal_staging
-        self._signal_staging = {}
+        self.signal_active = self.signal_staging
+        self.signal_staging = {}
 
-        self._event_active = self._event_staging
-        self._event_staging = []
-
-    def peek_signal(self, msg_cls: Type[SingleMessage]) -> list[SingleMessage]:
-        """
-        获取指定消息类型的缓冲池中的消息
-        """
-        return self._signal_active.get(msg_cls, [])
+        self.event_active = self.event_staging
+        self.event_staging = []
 
     def clear_signal(self) -> None:
         """
         清空指定消息类型的缓冲池
         """
-        self._signal_active.clear()
+        self.signal_active = {}
 
     def clear_event(self) -> None:
         """
         清空事件消息缓冲池
         """
-        self._event_active.clear()
+        self.event_active = []
+
+    def is_empty(self) -> bool:
+        """
+        判断缓冲区是否为空
+        """
+        return len(self.event_staging) == 0 and len(self.signal_staging) == 0
 
     def reset(self):
         """
         重置整个缓冲区，清空所有消息
         """
-        self._signal_active = {}
-        self._signal_staging = {}
-        self._event_active = []
-        self._event_staging = []
+        self.signal_active = {}
+        self.signal_staging = {}
+        self.event_active = []
+        self.event_staging = []

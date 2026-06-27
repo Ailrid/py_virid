@@ -41,7 +41,7 @@ class Engine:
                     f"[Virid Dispatch] No System Found: No system function is registered for message: {message_class.__name__}"
                 )
 
-            self.dispatcher.mark_dirty(message)
+            self.dispatcher.stage(message)
 
         self.pipeline(message, final_action)
 

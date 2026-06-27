@@ -15,7 +15,7 @@ from .interface import (
 )
 from .io import MessageWriter
 from .message import BaseMessage, SingleMessage, EventMessage
-from .stage import Stage
+from .staging import Staging
 
 
 class ExecutionTask:
@@ -26,33 +26,6 @@ class ExecutionTask:
         message: EventMessage | list[SingleMessage],
         priority: int,
         hook_context: ExecuteHookContext,
-    ):
-        self.message = message
-        self.system_fn = system_fn
-        self.priority = priority
-        self.hook_context = hook_context
-
-    def trigger_hook(
-        self,
-        hooks: list[
-            tuple[
-                type[BaseMessage],
-                ExecuteHook,
-            ]
-        ],
-        success: bool,
-    ):
-        # 根据是不是数组来取self.message的第一个
-        message = self.message[0] if isinstance(self.message, list) else self.message
-        try:
-            for hook in hooks:
-                if isinstance(message, hook[0]):
-                    hook[1](self.message, self.hook_context, success)
-        except Exception as e:
-            MessageWriter.error(e, f"[Virid Hook] System Execute Hook Error.\n")
-
-    def execute(
-        self,
         before_execute_hooks: list[
             tuple[
                 type[BaseMessage],
@@ -66,25 +39,51 @@ class ExecutionTask:
             ]
         ],
     ):
+        self.message = message
+        self.system_fn = system_fn
+        self.priority = priority
+        self.hook_context = hook_context
+        self.before_execute_hooks = before_execute_hooks
+        self.after_execute_hooks = after_execute_hooks
+        self.success = True
+
+    def trigger_hook(
+        self,
+        hooks: list[
+            tuple[
+                type[BaseMessage],
+                ExecuteHook,
+            ]
+        ],
+    ):
+        message = self.message[0] if isinstance(self.message, list) else self.message
+        try:
+            for hook in hooks:
+                if isinstance(message, hook[0]):
+                    hook[1](self.message, self.hook_context, self.success)
+        except Exception as e:
+            MessageWriter.error(e, f"[Virid Hook] System Execute Hook Error.\n")
+
+    def execute(
+        self,
+    ):
         success = True
-        self.trigger_hook(before_execute_hooks, success)
+        self.trigger_hook(self.before_execute_hooks)
         try:
             self.system_fn(self.message)
         except Exception as e:
             success = False
-            self.trigger_hook(after_execute_hooks, success)
+            self.trigger_hook(self.after_execute_hooks)
             # 重新丢出错误
             raise e
 
-        self.trigger_hook(after_execute_hooks, success)
+        self.trigger_hook(self.after_execute_hooks)
 
 
 class Dispatcher:
     def __init__(self, max_depth):
         self.max_depth = max_depth
-        self.stage = Stage()
-        self.event_queue: list[EventMessage] = []
-        self.dirty_signal_types: dict[Type[SingleMessage], None] = {}
+        self.staging = Staging()
 
         self.is_running = False
         self.internal_depth = 0
@@ -137,19 +136,12 @@ class Dispatcher:
         else:
             self.after_execute_hooks.append((message_type, hook))
 
-    def mark_dirty(self, message: BaseMessage):
-        self.stage.push(message)
-        # 根据消息类型放进不同的池子里
-        if isinstance(message, SingleMessage):
-            self.dirty_signal_types[type(message)] = None
-        elif isinstance(message, EventMessage):
-            self.event_queue.append(message)
+    def stage(self, message: BaseMessage):
+        self.staging.stage(message)
 
     def tick(self, system_task_map: dict[Type[BaseMessage], list[SystemTask]]):
         # 如果已经在运行，或者没有消息，直接返回
-        if self.is_running or (
-            len(self.dirty_signal_types) == 0 and len(self.event_queue) == 0
-        ):
+        if self.is_running or self.staging.is_empty():
             return
 
         self.is_running = True
@@ -161,33 +153,23 @@ class Dispatcher:
 
         try:
             # 用 while 循环代替递归，消化这一个 tick 衍生出的所有消息
-            while len(self.dirty_signal_types) > 0 or len(self.event_queue) > 0:
+            while not self.staging.is_empty():
+                
                 if self.internal_depth > self.max_depth:
-                    self.dirty_signal_types.clear()
-                    self.event_queue.clear()
-                    self.stage.reset()
+                    self.staging.reset()
                     print(
                         f"[Virid Dispatcher] Internal depth exceeded {self.max_depth}. Possible infinite loop detected. The dispatcher will stop processing this tick."
                     )
                     break  # 超过强制中断循环
 
                 self.internal_depth += 1
-
-                # 正式开始任务
                 try:
-                    signal_snapshot, event_snapshot = self.prepare_snapshot()
-                    tasks = self.collect_tasks(
-                        event_snapshot,
-                        signal_snapshot,
-                        system_task_map,
-                    )
+                    self.staging.flip()
+                    tasks = self.collect_tasks(system_task_map)
                     self.execute_tasks(tasks)
                 except Exception as e:
                     MessageWriter.error(e)
-                finally:
-                    self.clear()
         finally:
-            # 当所有层级的消息都处理完毕（或触发异常退出）后，恢复状态
             self.is_running = False
             self.internal_depth = 0
             self.execute_hooks(self.after_tick_hooks)
@@ -195,13 +177,11 @@ class Dispatcher:
 
     def collect_tasks(
         self,
-        event_snapshot: list[EventMessage],
-        signal_snapshot: list[Type[SingleMessage]],
         system_task_map: dict[Type[BaseMessage], list[SystemTask]],
     ):
         tasks: list[ExecutionTask] = []
         # 处理Event消息
-        for msg in event_snapshot:
+        for msg in self.staging.event_active:
             for system_task in system_task_map.get(type(msg), []):
                 tasks.append(
                     ExecutionTask(
@@ -213,22 +193,26 @@ class Dispatcher:
                             context=system_task.system_fn.system_context,  # type: ignore
                             payload={},
                         ),
+                        self.before_execute_hooks,
+                        self.after_execute_hooks,
                     )
                 )
 
         # 处理Signal消息
-        for msg_cls in signal_snapshot:
+        for msg_cls, msg_list in self.staging.signal_active.items():
             for system_task in system_task_map.get(msg_cls, []):
                 tasks.append(
                     ExecutionTask(
                         system_task.system_fn,
-                        self.stage.peek_signal(msg_cls),
+                        msg_list,
                         system_task.priority,
                         ExecuteHookContext(
                             tick=self.tick_counter,
                             context=system_task.system_fn.system_context,  # type: ignore
                             payload={},
                         ),
+                        self.before_execute_hooks,
+                        self.after_execute_hooks,
                     )
                 )
 
@@ -243,7 +227,7 @@ class Dispatcher:
 
         for task in tasks:
             try:
-                task.execute(self.before_execute_hooks, self.after_execute_hooks)
+                task.execute()
             except Exception as e:
                 MessageWriter.error(
                     e,
@@ -252,20 +236,6 @@ class Dispatcher:
                     + f"MessageName: {type(task.message).__name__} \n"
                     + f"MessageData: {task.message} \n",
                 )
-
-    def prepare_snapshot(self) -> tuple[list[type[SingleMessage]], list[EventMessage]]:
-        self.stage.flip()
-        signal_snapshot = list(self.dirty_signal_types.keys())
-        event_snapshot = self.event_queue[:]
-        self.dirty_signal_types.clear()
-        self.event_queue.clear()
-        return signal_snapshot, event_snapshot
-
-    def clear(
-        self,
-    ):
-        self.stage.clear_signal()
-        self.stage.clear_event()
 
     def execute_hooks(self, tick_hooks: list[TickHook]):
         hooks_context = TickHookContext(
