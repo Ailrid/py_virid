@@ -138,21 +138,21 @@ app.tick()
 
 # -----------Before Tick Hook Triggered-----------
 
-# context: TickHookContext(tick=0, time=1781522997.6059906, payload={})
+# context: TickHookContext(tick=0, time=1782548967.4085162, payload={})
 
 # ----------Activation hook triggered----------
 # Counter component activated, instance type: <class '__main__.Counter'>
 # -----------After Tick Hook Triggered-----------
 
 # message :DecreaseMessage()
-# context: ExecuteHookContext(tick=0, context={'params': [<class '__main__.Counter'>], 'message_type': <class '__main__.DecreaseMessage'>, 'method_name': 'decrement', 'original_method': <function decrement at 0x7f1b470f4cc0>}, payload={})
+# context: ExecuteHookContext(tick=0, context=SystemContext(params=[<class '__main__.Counter'>], message_type=<class '__main__.DecreaseMessage'>, method_name='decrement', original_method=<function decrement at 0x7fc606761440>), payload={}) 
 # success: True
 # -----------Before Tick Hook Triggered-----------
 
 # message :[IncreaseMessage(), IncreaseMessage()]
-# context: ExecuteHookContext(tick=0, context={'params': [<class '__main__.Counter'>], 'message_type': <class '__main__.IncreaseMessage'>, 'method_name': 'increment', 'original_method': <function increment at 0x7f1b470f4ae0>}, payload={})
+# context: ExecuteHookContext(tick=0, context=SystemContext(params=[<class '__main__.Counter'>], message_type=<class '__main__.IncreaseMessage'>, method_name='increment', original_method=<function increment at 0x7fc606761300>), payload={}) 
 # success: True
 # -----------After Tick Hook Triggered-----------
-# context: TickHookContext(tick=0, time=1781522997.6060486, payload={'payload': 'something'})
+# context: TickHookContext(tick=0, time=1782548967.4085655, payload={'payload': 'something'})
 
 # payload: something

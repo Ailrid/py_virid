@@ -3,10 +3,13 @@ Copyright (c) 2026-present Ailrid.
 Licensed under the Apache License, Version 2.0.
 Project: Virid
 """
+
 from dataclasses import dataclass
 from typing import Any, Callable, TypeVar
 from .message import BaseMessage
+
 T = TypeVar("T")
+
 
 @dataclass
 class SystemContext:
@@ -18,7 +21,6 @@ class SystemContext:
     message_type: type[BaseMessage]
     method_name: str
     original_method: Callable
-
 
 @dataclass
 class SystemTask:

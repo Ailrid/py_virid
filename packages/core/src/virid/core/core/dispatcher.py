@@ -67,12 +67,11 @@ class ExecutionTask:
     def execute(
         self,
     ):
-        success = True
         self.trigger_hook(self.before_execute_hooks)
         try:
             self.system_fn(self.message)
         except Exception as e:
-            success = False
+            self.success = False
             self.trigger_hook(self.after_execute_hooks)
             # 重新丢出错误
             raise e
@@ -154,7 +153,7 @@ class Dispatcher:
         try:
             # 用 while 循环代替递归，消化这一个 tick 衍生出的所有消息
             while not self.staging.is_empty():
-                
+
                 if self.internal_depth > self.max_depth:
                     self.staging.reset()
                     print(
@@ -232,7 +231,7 @@ class Dispatcher:
                 MessageWriter.error(
                     e,
                     f"[virid Dispatcher]: System Error. \n"
-                    + f"SystemName: {task.system_fn.system_context['method_name']} \n"  # type: ignore
+                    + f"SystemName: {task.system_fn.system_context.method_name} \n"  # type: ignore
                     + f"MessageName: {type(task.message).__name__} \n"
                     + f"MessageData: {task.message} \n",
                 )

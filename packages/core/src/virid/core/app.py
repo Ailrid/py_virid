@@ -9,7 +9,12 @@ from .core import Engine
 from .container import Container
 from typing import Type, Callable, TypeVar, overload, Any, Protocol
 from .core.message import BaseMessage, EventMessage, SingleMessage
-from .core.interface import TickHook, ExecuteHook, Middleware
+from .core.interface import (
+    SystemContext,
+    TickHook,
+    ExecuteHook,
+    Middleware,
+)
 from .core.io import MessageWriter
 from .decorators import component
 
@@ -73,94 +78,117 @@ class ViridApp:
         self,
         func: Callable,
     ) -> Callable[[], None]:
-        """Register a system and return the uninstall function"""
-        if getattr(func, "system_context", None) is None:
+        system_context = getattr(func, "system_context", None)
+        system_config = getattr(func, "system_config", None)
+
+        if system_context is None or system_config is None:
             raise ValueError(
-                f"[Virid System] Cannot Register System: System {func.__name__} must be registered with @System decorator!"
-            )
-        if getattr(func, "system_config", None) is None:
-            raise ValueError(
-                f"[Virid System] Cannot Register System: System {func.__name__} must be registered with @System decorator!"
+                f"[Virid System] Cannot Register System: System '{func.__name__}' "
+                f"must be decorated with @system before registration!"
             )
 
-        system_context = func.system_context  # type: ignore
-        system_config = func.system_config  # type: ignore
-
-        params = system_config["params"]
+        config_params = system_config["params"]
         final_message_type = system_config["message_type"]
         priority = system_config["priority"]
-        singleton = system_config["singleton"]
+        batch_mode = system_config["batch_mode"]
         message_idx = system_config["message_idx"]
-        # 闭包缓存变量
+
+        cached_components: list[Any] = [None] * len(config_params)
         is_initialized = False
-        cached_components: list[Any] = [None] * len(params)
 
-        # 根据 singleton 开关，精准重组参数负载
-        def build_args(message: Any) -> list:
-            """构建函数入参：将消息实体和可能存在的依赖注入按顺序排好"""
-            nonlocal is_initialized, cached_components, message_idx
+        def _init_deps():
+            """在系统首帧被触发时惰性求值，且只运行一次"""
+            nonlocal is_initialized
+            for idx, param in enumerate(config_params):
+                # 如果当前槽位不是消息参数（即它是全局单例 Component 依赖项）
+                if idx != message_idx:
+                    inject_instance = self.get(param.annotation)
+                    if inject_instance is None:
+                        raise RuntimeError(
+                            f"[virid System] Unknown Inject Data Types: '{param.name}' ({param.annotation.__name__}) "
+                            f"is not registered in the container for system '{func.__name__}'!"
+                        )
+                    cached_components[idx] = inject_instance
+            is_initialized = True
 
-            is_incoming_list = isinstance(message, list)
+        # 不需要注入消息
+        if message_idx is None:
 
-            # 加工最终要塞给函数对应的参数负载
-            if singleton:
-                # 单例模式：函数只想要单条消息
-                true_message = message[-1] if is_incoming_list else message
+            def wrapped_system(message: EventMessage | list[SingleMessage]):
+                nonlocal is_initialized
+                if not is_initialized:
+                    _init_deps()
+                handle_result(func(*cached_components))
 
-                # 运行时类型校验
-                if not isinstance(true_message, final_message_type):
-                    raise TypeError(
-                        f"[virid System] Type Mismatch: Expected {final_message_type.__name__}, but received {type(true_message).__name__}"
-                    )
-                payload = true_message
-            else:
-                # 批处理模式：函数想要一个消息列表
-                true_messages_list = message if is_incoming_list else [message]
-
-                # 运行时对列表内的元素进行类型校验
-                if true_messages_list and not isinstance(
-                    true_messages_list[0], final_message_type
-                ):
-                    raise TypeError(
-                        f"[virid System] Type Mismatch: Expected elements of {final_message_type.__name__}, but received {type(true_messages_list[0]).__name__}"
-                    )
-                payload = true_messages_list
-
-            # 首次命中去容器捞取并缓存所有 Component 单例
-            if not is_initialized:
-                for idx, param in enumerate(params):
-                    if idx != message_idx:
-                        # 只有在第一次运行时，才去全局容器里捞
-                        inject_instance = self.get(param.annotation)
-                        if inject_instance is None:
-                            raise RuntimeError(
-                                f"[virid System] Unknown Inject Data Types: '{param.name}' ({param.annotation.__name__}) "
-                                f"is not registered in the container for '{func.__name__}'!"
+        # 只需要注入消息
+        elif len(config_params) == 1:
+            if batch_mode:
+                # 批处理模式：确保传入的是完整列表
+                def wrapped_system(message: EventMessage | list[SingleMessage]):
+                    payload = message if isinstance(message, list) else [message]
+                    if __debug__:
+                        if payload and not isinstance(payload[0], final_message_type):
+                            raise TypeError(
+                                f"[virid System] Type Mismatch: Expected list[{final_message_type.__name__}], "
+                                f"got list[{type(payload[0]).__name__}]"
                             )
-                        cached_components[idx] = inject_instance
-                # 标记初始化完成
-                is_initialized = True
+                    handle_result(func(payload))
 
-            # 高频重组参数
-            call_args = []
-            for idx, param in enumerate(params):
-                if idx == message_idx:
-                    call_args.append(payload)
-                else:
-                    # 直接从闭包里的数组中拿
-                    call_args.append(cached_components[idx])
+            else:
+                # 单例模式：切片提取最后一张最新单据
+                def wrapped_system(message: EventMessage | list[SingleMessage]):
+                    payload = message[-1] if isinstance(message, list) else message
+                    if __debug__:
+                        if not isinstance(payload, final_message_type):
+                            raise TypeError(
+                                f"[virid System] Type Mismatch: Expected {final_message_type.__name__}, "
+                                f"got {type(payload).__name__}"
+                            )
+                    handle_result(func(payload))
 
-            return call_args
+        else:
+            if batch_mode:
+                # 混合模式 + 批处理
+                def wrapped_system(message: EventMessage | list[SingleMessage]):
+                    nonlocal is_initialized
+                    if not is_initialized:
+                        _init_deps()
 
-        # 包装函数 (同步)
-        def wrapped_system(message: EventMessage | list[SingleMessage]):
-            # 动态组装参数
-            call_args = build_args(message)
-            result = func(*call_args)
-            # 解析并处理返回值（支持链式反应）
-            handle_result(result)
+                    payload = message if isinstance(message, list) else [message]
+                    if __debug__:
+                        if payload and not isinstance(payload[0], final_message_type):
+                            raise TypeError(
+                                f"[virid System] Type Mismatch: Expected list[{final_message_type.__name__}]"
+                            )
 
-        wrapped_system.system_context = system_context  # type: ignore
+                    call_args = cached_components[:]
+                    call_args[message_idx] = payload
+                    handle_result(func(*call_args))
+
+            else:
+                # 混合模式 + 单例响应
+                def wrapped_system(message: EventMessage | list[SingleMessage]):
+                    nonlocal is_initialized
+                    if not is_initialized:
+                        _init_deps()
+
+                    payload = message[-1] if isinstance(message, list) else message
+                    if __debug__:
+                        if not isinstance(payload, final_message_type):
+                            raise TypeError(
+                                f"[virid System] Type Mismatch: Expected {final_message_type.__name__}"
+                            )
+
+                    call_args = cached_components[:]
+                    call_args[message_idx] = payload
+                    handle_result(func(*call_args))
+
+        wrapped_system.system_context = SystemContext(  # type: ignore
+            params=system_context["params"],
+            message_type=system_context["message_type"],
+            method_name=system_context["method_name"],
+            original_method=system_context["original_method"],
+        )
 
         return self.engine.register(final_message_type, wrapped_system, priority)
 
